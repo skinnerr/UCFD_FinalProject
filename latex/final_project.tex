@@ -1,0 +1,102 @@
+\documentclass[11pt]{article}
+
+\input{./preamble.tex}
+
+%%
+%% DOCUMENT START
+%%
+
+\begin{document}
+\fancypagestyle{allpages}
+{
+	\fancyhf[LH]{\rightmark}
+	\fancyhf[CH]{}
+	\fancyhf[RH]{\thepage\hspace*{1ex}/\hspace*{1ex}\pageref{lastpage}}
+	\fancyhf[LF]{}
+	\fancyhf[CF]{}
+	\fancyhf[RF]{}
+}
+
+\fancypagestyle{firstpage}
+{
+	\fancyhf[LH]{\Large Final Project \\ \large ASEN 5519: Unstructured CFD}
+	\fancyhf[CH]{}
+	\fancyhf[RH]{\large Ryan Skinner \\ \large Due 2016/??/??}
+	\fancyhf[LF]{}
+	\fancyhf[CF]{}
+	\fancyhf[RF]{}
+}
+
+\pagestyle{allpages}
+\thispagestyle{firstpage}
+\renewcommand{\sectionmark}[1]{ \markright{#1}{} }
+
+\setlist[itemize,1]{label=$\bullet$}
+\setlist[itemize,2]{label=$\circ$}
+\setlist[itemize,3]{label=$\diamond$}
+\setlist[itemize,4]{label=$\ast$}
+
+\vspace*{0in}
+\begin{center}
+\LARGE Improving Boundary Condition Stability in PHASTA
+\end{center}
+\vspace*{0.3in}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Introduction} %%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initial Outline of PHASTA} %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+PHASTA begins execution at `main`, located in `phSolver/[in]compressible`, depending on which branch is desired. This function initializes MPI, and then calls `phasta`, located in `/phSolver/common`. Here, inputs are read and computed in `input`, and then the solver is run by calling `proces`, a Fortran routine. Within `proces`, `gendat` generates geometry and BC data.
+\begin{outline}[deep]
+\1 `main`
+	\2 `phasta`
+		\3 `input`
+		\3 `proces`
+\end{outline}
+		
+\begin{outline}[deep]
+\1 `gendat`
+	\2 `geniBC` reads and generates boundary conditios (`iBC` array)
+	\2 `genBC` reads and generates the essential boundary conditions (`BC` array)
+\end{outline}
+
+%%
+%% DOCUMENT END
+%%
+\label{lastpage}
+\end{document}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
