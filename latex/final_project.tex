@@ -54,18 +54,18 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-PHASTA begins execution at `main`, located in `phSolver/[in]compressible`, depending on which branch is desired. This function initializes MPI, and then calls `phasta`, located in `/phSolver/common`. Here, inputs are read and computed in `input`, and then the solver is run by calling `proces`, a Fortran routine. Within `proces`, `gendat` generates geometry and BC data.
+PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depending on which branch is desired. This function initializes MPI, and then calls |phasta|, located in |/phSolver/common|. Here, inputs are read and computed in |input|, and then the solver is run by calling |proces|, a Fortran routine. Within |proces|, |gendat| generates geometry and BC data.
 \begin{outline}[deep]
-\1 `main`
-	\2 `phasta`
-		\3 `input`
-		\3 `proces`
+\1 |main|
+	\2 |phasta|
+		\3 |input|
+		\3 |proces|
 \end{outline}
 		
 \begin{outline}[deep]
-\1 `gendat`
-	\2 `geniBC` reads and generates boundary conditios (`iBC` array)
-	\2 `genBC` reads and generates the essential boundary conditions (`BC` array)
+\1 |gendat|
+	\2 |geniBC| reads and generates boundary conditios (|iBC| array)
+	\2 |genBC| reads and generates the essential boundary conditions (|BC| array)
 \end{outline}
 
 %%
