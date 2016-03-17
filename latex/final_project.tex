@@ -31,11 +31,6 @@
 \thispagestyle{firstpage}
 \renewcommand{\sectionmark}[1]{ \markright{#1}{} }
 
-\setlist[itemize,1]{label=$\bullet$}
-\setlist[itemize,2]{label=$\circ$}
-\setlist[itemize,3]{label=$\diamond$}
-\setlist[itemize,4]{label=$\ast$}
-
 \vspace*{0in}
 \begin{center}
 \LARGE Improving Boundary Condition Stability in PHASTA
@@ -44,22 +39,65 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Introduction} %%%%%%%%%%%%%%%%%%
+\section{Introduction}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Initial Outline of PHASTA} %
+\section{Initial Outline of PHASTA}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depending on which branch is desired. This function initializes MPI, and then calls |phasta|, located in |/phSolver/common|. Here, inputs are read and computed in |input|, and then the solver is run by calling |proces|, a Fortran routine. Within |proces|, |gendat| generates geometry and BC data.
 \begin{outline}[deep]
 \1 |main|
+	\2 initialize MPI
 	\2 |phasta|
-		\3 |input|
-		\3 |proces|
+		\3 initialize PETSc
+		\3 set input data paths
+		\3 |input| --- populate data structures with problem set-up and solver parameters
+			\4 |readnblk| --- read and blocks data
+				\5 read |numstart.dat| and finds appropriate |restart.dat| files
+				\5 read geometry from Posix or SyncIO files using |phio_readheader|
+				\5 calculate maximum number of boundary element nodes
+				\5 initialize constants like |ndof|, |ndofBC|, |ndiBCB|, and |ndBCB|
+				\5 |genblk| --- reads and blocks connectivity
+				\5 read BC mapping array into |nBC|
+				\5 read temporary boundary condition code into |iBCtmp|
+				\5 read BC data into |BCinp|
+				\5 read periodic BC data into |iperread|
+				\5 |genbkb| --- generate boundary element blocks and traces for gather/scatter operations
+				\5 read restart data into diffusive flux vector |qold|, primitive variables |uold|, and accelerations |acold|
+			\4 echo global information
+			\4 assert valid input constants (e.g. |icoord|, |navier|, |iexec|) defined in |common.h|
+			\4 echo solver and integration information
+			\4 |genint| --- generate integration information
+			\4 estimate number of nonzero globals
+			\4 compute fluid thermodynamic properties
+		\3 |proces| --- generate problem data and calls the solution driver
+			\4 |gendat| --- generate geometry and BC data
+				\5 |getshp| --- generate the interior nodal mapping
+				\5 |geniBC| --- generate boundary condition codes
+				\5 |genBC| --- generate the essential boundary conditions
+				\5 work with Dirichlet-to-Neumann BCs (?)
+				\5 |genshpb| --- generate boundary element shape functions
+				\5 |genini| --- generate ICs and initialize time-varying BCs
+			\4 |setper| and |perprep| --- store inverse of sum of one and number of slaves in |rcount|
+			\4 LES-specific routines |keeplhsG| and |setrls| called as needed
+			\4 |initStats| --- allocate arrays to store flow statistics
+			\4 RANS-specific routine |initTurb|
+			\4 cardiovascular-specific routine |initSponge|
+			\4 adjust BCs to interpolate from file |inlet.dat|, if it exists
+			\4 set up eddy-viscosity ramp specific to NGC/Duct case
+			\4 |itrdrv|
+		\3 finalize PETSc
+	\2 finalize MPI
+\end{outline}
+
+Numerical solution of the unsteady Navier-Stokes equations occurs within |itrdrv|, outlined below.
+\begin{outline}[deep]
+\1 |itrdrv|
 \end{outline}
 		
 \begin{outline}[deep]
@@ -73,27 +111,6 @@ PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depen
 %%
 \label{lastpage}
 \end{document}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
