@@ -18,6 +18,10 @@
 \usepackage{calc}
 \usepackage{outlines}
 
+% Page color.
+\usepackage{pagecolor}
+\pagecolor{white!75!black}
+
 % Graphics.
 %\usepackage{graphicx}
 \usepackage[update,prepend]{epstopdf} % To use eps files.
@@ -124,7 +128,7 @@ basicstyle=\ttfamily
 \lstset{breaklines,breakatwhitespace}
 
 % Define a chacacter as shorthand for inline listings.
-\lstMakeShortInline[basicstyle=\color{cyan!60!black}\small]{|}
+\lstMakeShortInline[basicstyle=\ttfamily\color{cyan!60!black}\small]{|}
 
 %%
 %% COMMANDS
@@ -149,6 +153,9 @@ basicstyle=\ttfamily
 
 % Degree symbol.
 % \newcommand{\degree}{\ensuremath{^\circ}}
+
+% Red asterisk.
+\newcommand{\ra}{{\bfseries\color{red}*}}
 
 % Superscript text: 1st, 2nd, 3rd, 4th
 \newcommand{\suptext}[1]{\ensuremath{^\text{#1}}\xspace}
@@ -329,3 +336,17 @@ basicstyle=\ttfamily
 %%% END OUTLINE %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+% Allow usage of \ttfamily in math mode (for lstinline inside math)
+\usepackage{letltxmacro}
+\newcommand*{\SavedLstInline}{}
+\LetLtxMacro\SavedLstInline\lstinline
+\DeclareRobustCommand*{\lstinline}{%
+  \ifmmode
+    \let\SavedBGroup\bgroup
+    \def\bgroup{%
+      \let\bgroup\SavedBGroup
+      \hbox\bgroup
+    }%
+  \fi
+  \SavedLstInline
+}

@@ -50,6 +50,11 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depending on which branch is desired. This function initializes MPI, and then calls |phasta|, located in |/phSolver/common|. Here, inputs are read and computed in |input|, and then the solver is run by calling |proces|, a Fortran routine. Within |proces|, |gendat| generates geometry and BC data.
+
+Routines followed by an asterisk (\ra) are outlined in further detail separately.
+
+{\huge \color{red!75!black} INCOMPRESSIBLE ONLY}, and we ignore cardiovascular impedance and RCR boundary stuff.
+
 \begin{outline}[deep]
 \1 |main|
 	\2 initialize MPI
@@ -62,7 +67,7 @@ PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depen
 				\5 read geometry from Posix or SyncIO files using |phio_readheader|
 				\5 calculate maximum number of boundary element nodes
 				\5 initialize constants like |ndof|, |ndofBC|, |ndiBCB|, and |ndBCB|
-				\5 |genblk| --- reads and blocks connectivity
+				\5 |genblk| --- read and block connectivity
 				\5 read BC mapping array into |nBC|
 				\5 read temporary boundary condition code into |iBCtmp|
 				\5 read BC data into |BCinp|
@@ -82,7 +87,7 @@ PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depen
 				\5 |genBC| --- generate the essential boundary conditions
 				\5 work with Dirichlet-to-Neumann BCs (?)
 				\5 |genshpb| --- generate boundary element shape functions
-				\5 |genini| --- generate ICs and initialize time-varying BCs
+				\5 |genini| --- read initial values in primitive ($\ul{U}$) form, satisfies BCs, and converts to $\ul{Y}$ form, filling the |y| vector
 			\4 |setper| and |perprep| --- store inverse of sum of one and number of slaves in |rcount|
 			\4 LES-specific routines |keeplhsG| and |setrls| called as needed
 			\4 |initStats| --- allocate arrays to store flow statistics
@@ -90,20 +95,80 @@ PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depen
 			\4 cardiovascular-specific routine |initSponge|
 			\4 adjust BCs to interpolate from file |inlet.dat|, if it exists
 			\4 set up eddy-viscosity ramp specific to NGC/Duct case
-			\4 |itrdrv|
+			\4 |itrdrv|\ra --- iterate the discrete solution using the predictor multi-corrector algorithm
 		\3 finalize PETSc
 	\2 finalize MPI
 \end{outline}
 
-Numerical solution of the unsteady Navier-Stokes equations occurs within |itrdrv|, outlined below.
+Numerical solution of the time-integrated unsteady Navier-Stokes equations occurs within |itrdrv|. Working arrays are listed in 
 \begin{outline}[deep]
 \1 |itrdrv|
+	\2 |initTimeSeries| --- initialize time series collection to |varts.*.dat| files using |xyzts.dat| input
+	\2 initialize |istep| and |ifuncs(:)| to zero, and set |yold = y| and |acold = ac|
+	\2 |initEQS| --- initialize equation solver (look into this later \ra ?)
+	\2 |do itsq = 1, ntseq| --- main loop over time sequences
+		\3 set |itseq = itsq|
+		\3 set iteration-specific variables for |nstep|, |niter|, |loctim|, and |deltol|
+		\3 |itrsetup| --- set up time integration parameters
+			\4 calculate $\alpha_m$, $\alpha_f$, and $\gamma$ as functions of $\rho_\infty$
+			\4 set Jacobian type (appears to be for a fringe case only?)
+			\4 mess with |ipred| and |y| for the same-delta predictor if we're on the first sequence
+			\4 set global time increment inverse |Dtgl| and CFL data |CFLfl|
+		\3 calculate number of flow solves per step, store in |nitr|
+		\3 |do istp = 1, nstp| --- main loop over time steps
+			\4 |asbwmod| --- set traction BCs if turbulence wall model is set (|itwmod|)
+			\4 |itrPredict|\ra --- predict solution at time $n+1$
+			\4 |itrBC|\ra --- satisfy BCs on the $\ul{Y}$-variables; returns a modified |y|
+			\4 |itrBCSclr|\ra --- satisfy BCs on the scalar |isclr|; returns a modified |y|
+			\4 ...
+			\4 ...
+			\4 ...
+		\3 deallocate variables and close files
+	\2 deallocate variables and close files
 \end{outline}
-		
+
+
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Symbol & Dimension & Description \\
+\midrule
+|nshg|   &  & \# global shape functions \\
+|ndof|   &  & \# number of degrees of freedom \\
+|npro|   &  & \# elements, indexed by $e$ \\
+|nshl|   &  & \# nodes per element, indexed by $a$ \\
+|ntseq|  &  & \# time sequences (?) \\
+|nstep|  &  & \# time steps requested for current run \\
+|lstep|  &  & current time step \\
+|lstep0| &  & first time step solved by current run, initialized to |lstep+1| \\
+|istep|  &  & step number relative to start of run \\
+|iter|   &  & iteration number \\
+|niter|  & |(MAXTS)|    & \# multi-corrector iterations per time step \\
+|loctim| & |(MAXTS)|    & local time stepping flag (?) \\
+|deltol| & |(MAXTS, 2)| & velocity and pressure delta ratios \\
+|impl|   & |(MAXTS)|    & heat, flow, and scalar solver flags (1's, 10's and 100's places) \\
+|iturb|  &  & indicates which turbulence model to use \\
+|ifunc|  &  & function evaluation counter, |niter*(lstep-lstep0)+iter| \\
+|ifuncs| & |(6)|						& function evaluation counter (?) \\
+|y|      & |(nshg, ndof)|            & $\ul{Y}$ variables \\
+|x|      & |(nshg, nsd)|             & node coordinates \\
+|iBC|    & |(nshg)|                  & BC codes \\
+|BC|     & |(nshg, ndofBC)|          & BC constraint parameters \\
+|shp|    & |(nshape, ngauss)|        & element shape functions at Gauss points (interior) \\
+|shb|    & |(nshapeb, ngaussb)|      & element shape functions at Gauss points (boundary) \\
+|shgl|   & |(nsd, nshape, ngauss)|   & local shape function gradients at Gauss points (interior) \\
+|shglb|  & |(nsd, nshapeb, nguassb)| & local shape function gradients at Gauss points (boundary) \\
+|iper|   & |(nshg)|				    & periodicity table \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Life's Persistent PHASTA Questions}
 \begin{outline}[deep]
-\1 |gendat|
-	\2 |geniBC| reads and generates boundary conditios (|iBC| array)
-	\2 |genBC| reads and generates the essential boundary conditions (|BC| array)
+	\1 Is |qold|, allocated in |readnblk.f| ever deallocated? Can't find it.
+	\1 Why do most of the time step parameters have dimension |MAXTS|?
+		\2 It also seems that some parameters are indexed by |itseq|, but don't change from step to step.
 \end{outline}
 
 %%
