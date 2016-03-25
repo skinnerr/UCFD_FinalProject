@@ -100,7 +100,7 @@ Routines followed by an asterisk (\ra) are outlined in further detail separately
 	\2 finalize MPI
 \end{outline}
 
-Numerical solution of the time-integrated unsteady Navier-Stokes equations occurs within |itrdrv|. Working arrays are listed in 
+Numerical solution of the time-integrated unsteady Navier-Stokes equations occurs within |itrdrv|. Working arrays are listed in Table \ref{tbl:symbols}.
 \begin{outline}[deep]
 \1 |itrdrv|
 	\2 |initTimeSeries| --- initialize time series collection to |varts.*.dat| files using |xyzts.dat| input
@@ -111,22 +111,53 @@ Numerical solution of the time-integrated unsteady Navier-Stokes equations occur
 		\3 set iteration-specific variables for |nstep|, |niter|, |loctim|, and |deltol|
 		\3 |itrsetup| --- set up time integration parameters
 			\4 calculate $\alpha_m$, $\alpha_f$, and $\gamma$ as functions of $\rho_\infty$
-			\4 set Jacobian type (appears to be for a fringe case only?)
-			\4 mess with |ipred| and |y| for the same-delta predictor if we're on the first sequence
+%			\4 set Jacobian type (appears to be for a fringe case only?)
+%			\4 mess with |ipred| and |y| for the same-delta predictor if we're on the first sequence
 			\4 set global time increment inverse |Dtgl| and CFL data |CFLfl|
 		\3 calculate number of flow solves per step, store in |nitr|
 		\3 |do istp = 1, nstp| --- main loop over time steps
 			\4 |asbwmod| --- set traction BCs if turbulence wall model is set (|itwmod|)
-			\4 |itrPredict|\ra --- predict solution at time $n+1$
-			\4 |itrBC|\ra --- satisfy BCs on the $\ul{Y}$-variables; returns a modified |y|
+			\4 |itrPredict|\ra --- predict primitive variables at time $n+1$
+			\4 |itrBC|\ra --- satisfy BCs on the primitive variables; returns a modified |y|
 			\4 |itrBCSclr|\ra --- satisfy BCs on the scalar |isclr|; returns a modified |y|
-			\4 ...
-			\4 ...
-			\4 ...
+			\4 |do istepc = 1, seqsize| --- loop over individual solves of flow and scalar
+				\5 |icode = stepseq(istepc)| --- get sequence code
+				\5 |if| this is a flow solve
+					\6 |SolFlow|\ra --- perform a flow solve
+				\5 |else if| this is a scalar solve
+					\6 |SolSclr| --- perform a scalar solve
+				\5 |else| this is an update
+					\6 |itrCorrect|\ra and |itrBC|\ra --- update flow if desired
+					\6 |itrCorrectSclr| and |itrBCSclr| --- update scalar if desired
+			\4 |stsGetStats| --- obtain time averaged statistics
+			\4 find solution at end of time step and move it to old solution variables
+			\4 increment |istep| and |lstep|
+			\4 |Bflux| --- compute the consistent boundary flux if desired
 		\3 deallocate variables and close files
 	\2 deallocate variables and close files
 \end{outline}
 
+Iteration routines...
+
+\begin{outline}[deep]
+\1 |itrPredict| --- predict solution variables at time $n+1$
+	\2 |if (ipred .eq. 1)| --- we are using same-velocity prediction, as discussed in class
+		\3 set $\oset{n+1}{\ul{Y}}^{(i)} = \oset{n}{\ul{Y}}$
+		\3 set $\oset{n+1}{\ul{Y}}^{(i)}_{,t} = (1-1/\gamma) \oset{n}{\ul{Y}}_{,t}$
+	\2 other prediction methods (zero-acceleration, same-acceleration, and same-delta) are also supported with different values of |ipred|
+\end{outline}
+
+Boundary conditions are set with the |iBC| and |BC| arrays. The bits of |iBC|, in increasing order, indicate whether the following BCs are set: $\rho$, $T$, $p$, $u_1$, $u_2$, $u_3$, scalars 1--4, periodicity, scaled plane extraction (SPEBC), axisymmetry, and deformable wall (for cardiovascular cases). This means for each global node, |iBC| has at least 14 bits. Note that |ibits(i,a,l)| extracts bits |a+1| through |a+l| of the integer |i|, and returns the base-10 integer. This routine is used to help identify and process boundary condition flags held in |iBC|.
+\begin{outline}[deep]
+\1 |itrBC| --- satisfy BCs on the primitive variables
+	\2 impose limits on $\ul{Y}$, using the |ylimit| data structure of dimension |(3, nflow)|, whose first index contains limit flag, lower limit, and upper limit for each flow variable.
+	\2 velocity BCs
+		\3 
+	\2 pressure BCs
+		\3 
+	\2 local periodic BCs
+	\2 global periodic BCs
+\end{outline}
 
 
 \begin{center}
@@ -134,10 +165,12 @@ Numerical solution of the time-integrated unsteady Navier-Stokes equations occur
 \toprule
 Symbol & Dimension & Description \\
 \midrule
-|nshg|   &  & \# global shape functions \\
-|ndof|   &  & \# number of degrees of freedom \\
+|nshg|   &  & \# global shape functions (|ngsh| = |nnp| if piecewise linear) \\
+|nnp|    &  & \# global nodal points \\
 |npro|   &  & \# elements, indexed by $e$ \\
 |nshl|   &  & \# nodes per element, indexed by $a$ \\
+|ndof|   &  & \# degrees of freedom, including scalars for turbulence models \\
+|nflow|  &  & \# flow variables (4 incompressible, 5 compressible) \\
 |ntseq|  &  & \# time sequences (?) \\
 |nstep|  &  & \# time steps requested for current run \\
 |lstep|  &  & current time step \\
@@ -162,6 +195,7 @@ Symbol & Dimension & Description \\
 |iper|   & |(nshg)|				    & periodicity table \\
 \bottomrule
 \end{tabular}
+\label{tbl:symbols}
 \end{center}
 
 \section{Life's Persistent PHASTA Questions}
@@ -169,6 +203,7 @@ Symbol & Dimension & Description \\
 	\1 Is |qold|, allocated in |readnblk.f| ever deallocated? Can't find it.
 	\1 Why do most of the time step parameters have dimension |MAXTS|?
 		\2 It also seems that some parameters are indexed by |itseq|, but don't change from step to step.
+	\1 When is it the case that $|ndof| \ne |nflow|$? For example during its limit-imposing stage, |itrbc| loops over |nflow| when indexing |y|'s dimension of size |ndof|.
 \end{outline}
 
 %%

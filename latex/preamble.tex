@@ -20,7 +20,7 @@
 
 % Page color.
 \usepackage{pagecolor}
-\pagecolor{white!75!black}
+\pagecolor{white!100!black}
 
 % Graphics.
 %\usepackage{graphicx}
@@ -166,8 +166,14 @@ basicstyle=\ttfamily
 \renewcommand{\th}{\suptext{th}}
 
 % Underline matrices
-\newcommand{\ul}[1]{\smash{\underline{#1}}}
-\newcommand{\uul}[1]{\smash{\underline{\underline{#1}}}}
+%\newcommand{\ul}[1]{\smash{\underline{#1}}}
+%\newcommand{\uul}[1]{\smash{\underline{\underline{#1}}}}
+\newcommand{\ul}[1]{\underline{#1}}
+\newcommand{\uul}[1]{\underline{\underline{#1}}}
+
+% Overset and underset with phantom to allow expected super- and sub-scripts
+\newcommand{\oset}[2]{\overset{#1}{#2}\vphantom{#2}}
+\newcommand{\uset}[2]{\underset{#1}{#2}\vphantom{#2}}
 
 % Partial derivatives
 \newcommand{\pp}[2]{\ensuremath{\frac{\partial#1}{\partial#2}}}
