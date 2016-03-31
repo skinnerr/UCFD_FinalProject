@@ -60,7 +60,7 @@ Routines followed by an asterisk (\ra) are outlined in further detail separately
 	\2 initialize MPI
 	\2 |phasta|
 		\3 initialize PETSc
-		\3 set input data paths
+		\3 |input_fform| --- read ASCII data from |input.config| and |solver.inp|
 		\3 |input| --- populate data structures with problem set-up and solver parameters
 			\4 |readnblk| --- read and blocks data
 				\5 read |numstart.dat| and finds appropriate |restart.dat| files
@@ -73,7 +73,7 @@ Routines followed by an asterisk (\ra) are outlined in further detail separately
 				\5 read BC data into |BCinp|
 				\5 read periodic BC data into |iperread|
 				\5 |genbkb| --- generate boundary element blocks and traces for gather/scatter operations
-				\5 read restart data into diffusive flux vector |qold|, primitive variables |uold|, and accelerations |acold|
+				\5 read restart data for solution |qold|, displacement |uold|, and accelerations |acold|
 			\4 echo global information
 			\4 assert valid input constants (e.g. |icoord|, |navier|, |iexec|) defined in |common.h|
 			\4 echo solver and integration information
@@ -82,19 +82,30 @@ Routines followed by an asterisk (\ra) are outlined in further detail separately
 			\4 compute fluid thermodynamic properties
 		\3 |proces| --- generate problem data and calls the solution driver
 			\4 |gendat| --- generate geometry and BC data
-				\5 |getshp| --- generate the interior nodal mapping
+				\5 |genshp| --- generate interior element shape functions and derivatives
+					\6 loop through element topologies, getting their coordinate system and element type, and then generate the parent element shape functions and their derivatives by calling either |shpTet| (tets), |shphex| (hexes), |shp6w| (wedges), or |shppyr| (pyramids)
+					\6 these are all C routines, and some are in |phasta/shapeFunction/|, whereas others are in |phasta/phSolver|
+					\6 |shp(a,i,j,p)| and |shgl(a,i,p)| are indexed by topology index |a|, spatial dimension(s) |i| and |j|, and the integration point index $|p| = 1, ..., |nint|$
 				\5 |geniBC| --- generate boundary condition codes
+					\6 set |iBC| to |iBCtmp| if this partition has boundary nodes
 				\5 |genBC| --- generate the essential boundary conditions
-				\5 work with Dirichlet-to-Neumann BCs (?)
-				\5 |genshpb| --- generate boundary element shape functions
-				\5 |genini| --- read initial values in primitive ($\ul{U}$) form, satisfies BCs, and converts to $\ul{Y}$ form, filling the |y| vector
+					\6 set |BCtmp| to |BCinp| if this partition has boundary nodes
+					\6 |genwnm| --- calculate wall normals and modify |BCtmp| with the appropriate constraints
+					\6 |genotwn| --- determine first ``off-the-wall-node'' for each node, store result in |otwn(nshg)|
+					\6 |genBC1| --- account for arbitrarily-oriented velocity constraints $u_r$, $u_s$, and $u_t$, finally storing the simplified result in |BC|
+				%\5 work with Dirichlet-to-Neumann BCs (?)
+				\5 |genshpb| --- generate boundary element shape functions and derivatives (like |genshp|), storing results in |shpb| and |shglb|
+				\5 LES: call |setfilt|, |filtprep|, and depending on |iLES|' value, |setave| and |aveprep|
+				\5 |genini| --- generate initial values of solution variables
+					\6 |restar| --- sort initial values into |y| (called |q| inside |restar|) and |ac| from |qold| and |acold|, respectively, that were read in |readnblk|
+					\6 |itrBC|\ra and |itrBCSclr|\ra --- satisfy BCs
 			\4 |setper| and |perprep| --- store inverse of sum of one and number of slaves in |rcount|
-			\4 LES-specific routines |keeplhsG| and |setrls| called as needed
+			\4 LES: |keeplhsG| and |setrls|
 			\4 |initStats| --- allocate arrays to store flow statistics
 			\4 RANS-specific routine |initTurb|
-			\4 cardiovascular-specific routine |initSponge|
-			\4 adjust BCs to interpolate from file |inlet.dat|, if it exists
-			\4 set up eddy-viscosity ramp specific to NGC/Duct case
+			%\4 cardiovascular-specific routine |initSponge|
+			%\4 adjust BCs to interpolate from file |inlet.dat|, if it exists
+			%\4 set up eddy-viscosity ramp specific to NGC/Duct case
 			\4 |itrdrv|\ra --- iterate the discrete solution using the predictor multi-corrector algorithm
 		\3 finalize PETSc
 	\2 finalize MPI
@@ -104,22 +115,26 @@ Numerical solution of the time-integrated unsteady Navier-Stokes equations occur
 \begin{outline}[deep]
 \1 |itrdrv|
 	\2 |initTimeSeries| --- initialize time series collection to |varts.*.dat| files using |xyzts.dat| input
-	\2 initialize |istep| and |ifuncs(:)| to zero, and set |yold = y| and |acold = ac|
-	\2 |initEQS| --- initialize equation solver (look into this later \ra ?)
-	\2 |do itsq = 1, ntseq| --- main loop over time sequences
+	\2 initialize |istep| and |ifuncs(:)| to zero
+	\2 set |yold = y| and |acold = ac|, that is, populate $\oset{n}{\ul{Y}}$ and $\oset{n}{\ul{Y}_{,t}}$ with their converged solutions from the previous time step, which was read from a restart file
+	\2 |initEQS| --- initialize equation solver (look into this later \ra?)
+	\2 initialize |lstep0 = lstep + 1| to hold the first time step solved by the current run
+	\2 |do itsq = 1, ntseq| --- loop over time sequences; as far as I can tell |ntseq = 1| is the default in |input.config|, and time sequences are not often used
 		\3 set |itseq = itsq|
-		\3 set iteration-specific variables for |nstep|, |niter|, |loctim|, and |deltol|
-		\3 |itrsetup| --- set up time integration parameters
-			\4 calculate $\alpha_m$, $\alpha_f$, and $\gamma$ as functions of $\rho_\infty$
+		\3 set iteration-specific variables |nstp = nstep|, |nitr = niter|, |LCtime = loctim|, and |dtol(:) = deltol(:)|, where all of the longer-named variables are indexed by |itseq|
+		\3 |itrSetup| --- set up time integration parameters
+			\4 calculate $\alpha_m$, $\alpha_f$, and $\gamma$ as functions of $\rho_\infty$ (|almi|, |alfi|, and |gami| as functions of |rhoinf|)
 %			\4 set Jacobian type (appears to be for a fringe case only?)
 %			\4 mess with |ipred| and |y| for the same-delta predictor if we're on the first sequence
-			\4 set global time increment inverse |Dtgl| and CFL data |CFLfl|
-		\3 calculate number of flow solves per step, store in |nitr|
+			\4 set inverse of global time step |Dtgl| and CFL data |CFLfl|
+		\3 calculate number of flow solves per time step, store in |nitr| (IC), |niter| (C)
+		\3 initialize |istop = 0|; flag can be set to stop the solver based on statistics of the residual
 		\3 |do istp = 1, nstp| --- main loop over time steps
+			\4 LES: |lesmodels|
 			\4 |asbwmod| --- set traction BCs if turbulence wall model is set (|itwmod|)
 			\4 |itrPredict|\ra --- predict primitive variables at time $n+1$
-			\4 |itrBC|\ra --- satisfy BCs on the primitive variables; returns a modified |y|
-			\4 |itrBCSclr|\ra --- satisfy BCs on the scalar |isclr|; returns a modified |y|
+			\4 |itrBC|\ra --- satisfy BCs on primitive variables; return a modified |y|
+			\4 |itrBCSclr| --- satisfy BCs on scalar |isclr|; return a modified |y|
 			\4 |do istepc = 1, seqsize| --- loop over individual solves of flow and scalar
 				\5 |icode = stepseq(istepc)| --- get sequence code
 				\5 |if| this is a flow solve
@@ -142,21 +157,27 @@ Iteration routines...
 \begin{outline}[deep]
 \1 |itrPredict| --- predict solution variables at time $n+1$
 	\2 |if (ipred .eq. 1)| --- we are using same-velocity prediction, as discussed in class
-		\3 set $\oset{n+1}{\ul{Y}}^{(i)} = \oset{n}{\ul{Y}}$
-		\3 set $\oset{n+1}{\ul{Y}}^{(i)}_{,t} = (1-1/\gamma) \oset{n}{\ul{Y}}_{,t}$
+		\3 set $\oset{n+1}{\ul{Y}}^{(i)} = \oset{n}{\ul{Y}}$ with |y = yold|
+		\3 set $\oset{n+1}{\ul{Y}}^{(i)}_{,t} = (1-1/\gamma) \oset{n}{\ul{Y}}_{,t}$ with |ac = acold * (gami-one)/gami|
 	\2 other prediction methods (zero-acceleration, same-acceleration, and same-delta) are also supported with different values of |ipred|
 \end{outline}
 
-Boundary conditions are set with the |iBC| and |BC| arrays. The bits of |iBC|, in increasing order, indicate whether the following BCs are set: $\rho$, $T$, $p$, $u_1$, $u_2$, $u_3$, scalars 1--4, periodicity, scaled plane extraction (SPEBC), axisymmetry, and deformable wall (for cardiovascular cases). This means for each global node, |iBC| has at least 14 bits. Note that |ibits(i,a,l)| extracts bits |a+1| through |a+l| of the integer |i|, and returns the base-10 integer. This routine is used to help identify and process boundary condition flags held in |iBC|.
+Boundary conditions are set with the |iBC| and |BC| arrays. The bits of |iBC|, in increasing order, indicate whether the following BCs are set: $\rho$, $T$, $p$, $u_1$, $u_2$, $u_3$, scalars 1--4, periodicity, scaled plane extraction (SPEBC), axisymmetry, and deformable wall (for cardiovascular cases). This means for each global node, |iBC| has at least 14 bits. Note that |ibits(i,a,l)| extracts bits |a+1| through |a+l| of the integer |i|, and returns the base-10 integer. This routine is used to help identify and process boundary condition flags held in |iBC|. For example, if |ibits(iBC,3,3) .eq. 1| then $u_1$ is the only velocity component specified essential BC.
 \begin{outline}[deep]
 \1 |itrBC| --- satisfy BCs on the primitive variables
-	\2 impose limits on $\ul{Y}$, using the |ylimit| data structure of dimension |(3, nflow)|, whose first index contains limit flag, lower limit, and upper limit for each flow variable.
+	\2 impose limits on flow variables in |y|, using the |ylimit| data structure of dimension |(3, nflow)|, whose first index contains the limit flag, lower limit, and upper limit for each flow variable
 	\2 velocity BCs
 		\3 
 	\2 pressure BCs
 		\3 
 	\2 local periodic BCs
 	\2 global periodic BCs
+\end{outline}
+
+Once boundary conditions have been satisfied, |SolFlow| is called to perform a flow solve:
+\begin{outline}[deep]
+\1 |SolFlow| --- perform a flow solve; output |res| preconditioned residual, 
+	\2 
 \end{outline}
 
 Going through lectures 26 and 27.
@@ -201,15 +222,18 @@ Symbol & Dimension & Description \\
 |iturb|  &  & indicates which turbulence model to use \\
 |ifunc|  &  & function evaluation counter, |niter*(lstep-lstep0)+iter| \\
 |ifuncs| & |(6)|						& function evaluation counter (?) \\
-|y|      & |(nshg, ndof)|            & $\ul{Y}$ variables \\
+|y|      & |(nshg, ndof)|            & $\oset{n+\alpha_f}{\ul{Y}}_{A}^{(i)}$ (meaning changes throughout) \\
+|ac|     & |(nshg, ndof)|            & $\oset{n+\alpha_m}{\ul{Y}}_{A,t}^{(i)}$ (meaning changes throughout) \\
+|yold|   & |(nshg, ndof)|            & $\oset{n}{\ul{Y}}_{A}^{(i)}$ (meaning changes throughout) \\
+|acold|  & |(nshg, ndof)|            & $\oset{n}{\ul{Y}}_{A,t}^{(i)}$ (meaning changes throughout) \\
 |x|      & |(nshg, nsd)|             & node coordinates \\
 |iBC|    & |(nshg)|                  & BC codes \\
 |BC|     & |(nshg, ndofBC)|          & BC constraint parameters \\
+|iper|   & |(nshg)|				    & periodicity table \\
 |shp|    & |(nshape, ngauss)|        & element shape functions at Gauss points (interior) \\
 |shb|    & |(nshapeb, ngaussb)|      & element shape functions at Gauss points (boundary) \\
 |shgl|   & |(nsd, nshape, ngauss)|   & local shape function gradients at Gauss points (interior) \\
 |shglb|  & |(nsd, nshapeb, nguassb)| & local shape function gradients at Gauss points (boundary) \\
-|iper|   & |(nshg)|				    & periodicity table \\
 \bottomrule
 \end{tabular}
 \label{tbl:symbols}
