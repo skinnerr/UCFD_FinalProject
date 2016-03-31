@@ -159,6 +159,23 @@ Boundary conditions are set with the |iBC| and |BC| arrays. The bits of |iBC|, i
 	\2 global periodic BCs
 \end{outline}
 
+Going through lectures 26 and 27.
+
+First in the compressible code.
+Data structures are used in |solgmr| -> |elmgmrs| (sparse). Section on diffusive flux reconstruction, set up some arrays for interior elements. call |asigmr|, took care of volume integrals. now come to boundary elements, which is where integral over gamma takes place. block boundary elements as a separate list of elements with separate connectivity. as |asbmfg| is called, |mienb| holds boundary elements. computing normal gradients requires nodes off of the boundary. solution goes into |asbmfg| (no time derivatives are input, unlike |asigmr|), out comes a modified solution. in |asibmfg|: working with a block of elements; solution and coordinates are localized, local residual is zeroed, call |e3b|, assemble local residual. in |e3b|: loop over quadrature points (|ngaussb|), |getshpb| to get boundary shape functions, |e3bvar| called with surface normals, need |Fv{2,3,4}| to evaluate the floating flux, let |e3bvar| compute |Fv| values and fluxes, then test if we should use computed value or value from prescribed boundary condition. in |e3bvar|: interpolate nodal values to quadrature points, call |getthm| to compute thermodynamic state, compute element metrics for mapping physical space to get |wdetj|, compute |rou|,|p| and |tau*n|,|heat| (normal flux, pressure, traction vector, heat flux) that is, |rou| takes $h^m(\xi_l)$, |p| takes $h^p(\xi_l)$, |tau*n| takes $h^v_*(\xi_l)$, etc. what's passed out is these things and the raw variables, their gradients, and the derived thermodynamic state. Back to |e3b|, do convective pressure, n-s, heat terms. after return from |e3bvar|, if no natural bc flag is set, we overwrite |rou|,|p| with floating values. compute euler stuff; then compute viscous stuff. get floating flux |tau*n|, overwrite where bits are not set. be careful what's passed out and in. also compute aerodynamic forces and heat flux in |e3b|, since we're doing surface integrals anyway.
+
+incompressible is different, slightly. don't interpolate temperature at the outset; compute normal via cross-product; compute deformation gradient, local and global variable gradients; |unm| has the floating value of $\ul{u} \cdot \ul{n}$. eventually compute |tau*n|, which has the total stress floating value. skip over a bunch of deforming-wall stuff. iBCB did not come in to e3bvar; only floating flux stuff is computed in |e3bvar| for incompressible. all nodal interpolation is now done in |e3b|:
+
+for Dirichlet bcs, |iBC| was a bitmap to boundary conditions |BC|
+
+for natural bcs, |ibcb|(1:nel$_\text{in block (npro)}$,...) is a bitmap to boundary conditions |BCB|(:,...), where ... takes normal flux, pressure, traction vector, and heat flux take values 1--4.
+
+going through more code... (2016-03-30)
+
+compressible |itrdrv|. common |genadj| creates |rowp| and |colm|, assuming we had the matrix in our hands. but how do we do this if we don't have the non-sparse matrix availble? that's what |genadj| does. |asadj| loops over elements, gets a list of local node numbers, cross-associate them in the |row_fill_list| if that global node doesn't need to be put in the |row_fill_list|. only needs to be done once each time per adaptation; some stuff is $\bigo(n^2)$, but per processor. So maybe only 600=n per processors, which is not that bad. Back in |genadj|, we build the |rowp| and |col| arrays. we need their elements to be ordered since we do a binary search on them at some points.
+
+this stuff is used in |irdrv| when it calls |solgmrs|, calls |elmgmrs| to populate lshk with current iteration's tangent values (same for |res|). allows us to start |gmres|; factorize matrix; precondition rhs with |i3lu|; |spsi3pre| sparse matrix preconditioning of |lhsk|; copy preconditioned residual into |uBrg|, which is a collection or Krylov vectors; calculate it's norm, make orthonormal; outer gmres loop |do 2000| can be skipped, which is the gmres restart; actual start of GMRES discussed in class is |uBrg| statement just before |do 1000|; |sumgat| does off-processor (communication).
+
 
 \begin{center}
 \begin{tabular}{@{}lll@{}}
