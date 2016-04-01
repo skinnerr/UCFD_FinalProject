@@ -70,7 +70,7 @@ PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depen
 Most file input occurs in |input|, which populates data structures with problem and solver parameters.
 \begin{outline}[deep]
 \1 |input|
-	\2 |readnblk| --- read and blocks data
+	\2 |readnblk| --- read and block data
 		\3 read |numstart.dat| and finds appropriate |restart.dat| files
 		\3 read geometry from Posix or SyncIO files using |phio_readheader|
 		\3 calculate maximum number of boundary element nodes
@@ -119,8 +119,8 @@ The next overarching routine, |proces|, generates problem data and calls the sol
 		\3 LES: call |setfilt|, |filtprep|, and depending on |iLES|' value, |setave| and |aveprep|
 		\3 |genini| --- generate initial values of solution variables
 			\4 |restar| --- sort initial values into |y| (called |q| inside |restar|) and |ac| from |qold| and |acold|, respectively, that were read in |readnblk|
-			\4 |itrBC|\ra and |itrBCSclr|\ra --- satisfy BCs
-	\2 |setper| and |perprep| --- store inverse of sum of one and number of slaves in |rcount|
+			\4 |itrBC|\ra and |itrBCSclr|\ra --- satisfy BCs, outlined later in this document
+	\2 |setper| and |perprep| --- allocate and store inverse of sum of one and number of slaves in |rcount|, in preparation for dealing with periodic boundaries
 	\2 LES: |keeplhsG| and |setrls|
 	\2 |initStats| --- allocate arrays to store flow statistics
 	\2 RANS: |initTurb|
@@ -137,16 +137,25 @@ Numerical solution of the time-integrated unsteady Navier-Stokes equations occur
 		\3 determine how many scalar equations need solution, |nsclrsol| (\# scalars + 1 if temperature)
 		\3 determine whether we are solving the flow
 		\3 |genadj| --- pre-process the adjacency list
-			\4 |do iblk = 1, nelblk| --- loop over blocks (groups of elements with the same topology)
+			\4 |do iblk = 1, nelblk| --- loop over element blocks (groups of elements with the same topology)
 				\5 |Asadj| --- generate adjacency data structures |row_fill_list| and |adjcnt|
 					\6 declare |row_fill_list| to have dimension |(nshg, 15*nnz)|, where |15*nnz| is a high estimate of the maximum number of adjacent nodes
 					\6 |row_fill_list(A,:)| holds global nodes that share local support with global node |A|
 					\6 |adjcnt(A)| holds the number of nodes adjacent to |A|, that is, how many entries |row_fill_list(A,:)| was populated with on purpose
 					\6 \emph{note}: some operations here are $\bigo(n^2)$, but $n$ is relatively small on each processor, and this process only needs to be done once for a given mesh connectivity
 			\4 build the |colm| array (which is trivial to do at this point)
-			\4 sort |rowp|, because we binary search it when computing the sparse $\uul{A}\:\ul{p}$-product, and also compute the number of non-zero blocks |icnt| on this partition
+			\4 sort |rowp|, because we binary search it when computing the sparse $\uul{A}\:\ul{p}$-product, and also compute the number of non-zero element blocks |icnt| on this partition
 		\3 set |nnz_tot = icnt|
 		\3 depending on |nsolflow| and |nsclrsol| (whether this is a flow or scalar solve), initialize certain constants, such as |equType|, |nDofs|, |nPermDims|, |nTmpDims|, and allocate certain arrays, such as |apermS| and |atempS|
+	\2 |genlmass| --- generates lumped mass matrix |gmass| if we are using a lumped mass fraction on either the LHS or RHS
+		\3 |AsImass| assembles the interior lumped mass matrix within a loop over element blocks
+			\4 |localx| --- gather node coordinates to local frame
+			\4 |do intp = 1, ngauss| --- loop over Gauss points
+				\5 |getshp| --- returns the shape functions evaluated at this point, |shape| and |shdrv|
+				\5 |e3metric| --- compute the deformation gradient ($dx_i/d\xi_j$ or |dxdxi(npro,i,j)|) and its inverse (|dxidx|), as well as the quadrature-weighted Jacobian determinant |WdetJ| and the global shape function gradient |shg|
+				\5 add contribution of this Gauss point to the local mass matrix
+			\4 compute the trace and scale the diagonal, operating on local mass matrices
+			\4 |local| --- assemble the global residual, |gmass|
 	\2 initialize |lstep0 = lstep + 1| to hold the first time step solved by the current run
 	\2 |do itsq = 1, ntseq| --- loop over time sequences; as far as I can tell |ntseq = 1| is the default in |input.config|, and time sequences are not often used
 		\3 set |itseq = itsq|
@@ -179,7 +188,7 @@ Numerical solution of the time-integrated unsteady Navier-Stokes equations occur
 	\2 deallocate variables and close files
 \end{outline}
 
-Iteration routines...
+The following routines specific to the generalized-alpha method are used primarily in |itdrv|, but some are called (above) to prepare input data, such as |itrBC| and |itrPredict|.
 
 \begin{outline}[deep]
 \1 |itrPredict| --- predict solution variables at time $n+1$
@@ -199,11 +208,78 @@ Boundary conditions are set with the |iBC| and |BC| arrays. The bits of |iBC|, i
 	\2 global periodic
 \end{outline}
 
-Once boundary conditions have been satisfied, |SolFlow| is called to perform a flow solve:
+In the event of an update, |itrCorrect| is called (followed by |itrBC|) to update the solution at time $n+1$, such that it is consistent with the most recent solve.
+\begin{outline}[deep]
+\1 |itrCorrect|
+	\2 set $|fct1| = \gamma \Delta t$
+	\2 set $|fct2| = \gamma \alpha_f \Delta t$
+	\2 update velocity: $\oset{n+1}{\ul{Y}}^{(i)}_\text{velocity}| += fct1 * solinc(:,1:3)|$, where $|solinc(:,1:3)| = \oset{n+1}{\ul{Y}}^{(i)}_{\text{velocity},t}$
+	\2 update pressure: $\oset{n+1}{\ul{Y}}^{(i)}_\text{pressure}| += fct2 * solinc(:,4)|$, where $|solinc(:,4)| = \oset{n+1}{\ul{Y}}^{(i)}_{\text{pressure},t}$
+	\2 update acceleration: $\oset{n+1}{\ul{Y}}^{(i)}_{\text{velocity},t}| += solinc(:,1:3)|$
+\end{outline}
+
+Once boundary conditions have been satisfied at the beginning of an iteration, |SolFlow| is called from within |itrdrv| to perform a flow solve. The general form of the system we seek a solution to is
+\begin{equation}
+\begin{bmatrix}
+\uul{K}   & \uul{G} \\
+\uul{G}^T & \uul{C}
+\end{bmatrix}
+\begin{bmatrix}
+\Delta \ul{u}_{j,t} \\
+\Delta \ul{p}_{,t}
+\end{bmatrix}
+=
+\begin{bmatrix}
+\oset{\text{mom}}{\ul{R}} \\
+\oset{\text{cont}}{\ul{R}}
+\end{bmatrix}
+\end{equation}
+Because we are looking at the incompressible code, the temperature equation is not included in the flow solve matrix system, and is instead solved separately as a scalar.
 \begin{outline}[deep]
 \1 |SolFlow| --- perform a flow solve; output |res| preconditioned residual, 
 	\2 |itrYAlpha| --- compute $\oset{n+\alpha_f}{\ul{Y}}^{(i)}$ and $\oset{n+\alpha_m}{\ul{Y}}^{(i)}_{,t}$, store respectively in |yAlpha| and |acAlpha|
 	\2 |ElmGMR| --- compute tangent matrix, residual vector, and preconditioning matrix for GMRES
+		\3 |if| using a global reconstruction approach
+			\4 |do iblk = 1, nelblk| --- loop over element blocks
+				\5 |if| this is the last time step and we need to compute vorticity, call |AsIqGradV|
+				\5 |AsIq|\ra --- compute and assemble the diffusive flux residual vector |qres| and the lumped mass matrix |rmass|
+			\4 |qpbc| --- satisfy periodic BCs on |rmass| and |qres|
+		\3 initialize |res = 0|, which is the full system residual $\ul{G}_b$
+		\3 |do iblk = 1, nelblk| --- loop over element blocks
+			\4 |AsIGMR| --- compute and assemble residual and tangent matrix
+			\4 |bc3lhs| --- satisfy boundary conditions on the tangent matrix
+			\4 |fillsparseI| --- fill the sparse tangent matrix data structures, 
+		\3 |lmassadd| --- add lumped mass matrix contributions if we are lumping
+		\3 compute time averaged statistics
+		\3 |do iblk = 1, nelblb| --- loop over boundary element blocks
+			\4 |AsBMFG| ---
+			\4 |bc3lhs| --- 
+			\4 |fillsparseI| ---
+		\3 |rotabc| --- rotate the residual vector before cross-processor communication for efficiency
+		\3 |commu| --- communicate with other processors
+		\3 |bc3Res| --- satisfy boundary conditions on the residual vector
+	\2 |usrNew| --- set up GMRES solver
+	\2 |myfLesSolve| --- 
+\end{outline}
+
+The diffusive flux residual vector |qres| and the lumped mass matrix |rmass| are compred and assembed within |AsIq|:
+\begin{outline}[deep]
+\1 |AsIq|
+	\2 gather $|y| \rightarrow |yl|$ and $|x| \rightarrow |xl|$ via |localy| and |localx|
+	\2 initialize |ql = 0| and |rmassl = 0|
+	\2 |e3q| --- compute the element-wise residuals |ql| and |rmassl|
+		\3 |do intp = 1, ngauss| --- loop over Gauss points
+			\4 |getshp| --- get shape functions and derivatives at Gauss points
+			\4 |e3qvar| --- compute integration variables necessary for formation of |ql|
+				\5 
+			\4 |getdiff| --- compute the viscosity at this point
+			\4 compute diffusive fluxes, stored in |qdi|
+			\4 |do i = 1, nshl| --- loop over local nodes
+				\5 add contributions to |ql|
+			\4 compute local contribution to the lumped mass matrix |rmassl|
+			\4 compute 
+		\3 normalize the mass matrix if desired (if |idiff == 3|)
+	\2 scatter $|ql| \rightarrow |qres|$ and $|rmassl| \rightarrow |rmass|$
 \end{outline}
 
 Going through lectures 26 and 27.
@@ -235,7 +311,7 @@ Symbol & Dimension & Description \\
 |nflow|  &  & \# flow variables (4 incompressible, 5 compressible) \\
 |ntseq|  &  & \# time sequences, which seems seldom used and defaults to 1 \\
 |nstep|  &  & \# time steps requested per sequence \\
-|nelblk| &  & \# blocks \\
+|nelblk| &  & \# element blocks \\
 |ipord|  &  & order of basis functions \\
 |lstep|  &  & current time step \\
 |lstep0| &  & first time step solved by current run, initialized to |lstep+1| \\
