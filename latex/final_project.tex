@@ -221,8 +221,8 @@ In the event of an update, |itrCorrect| is called (followed by |itrBC|) to updat
 Once boundary conditions have been satisfied at the beginning of an iteration, |SolFlow| is called from within |itrdrv| to perform a flow solve. The general form of the system we seek a solution to is
 \begin{equation}
 \begin{bmatrix}
-\uul{K}   & \uul{G} \\
-\uul{G}^T & \uul{C}
+\uul{K}    & \uul{G} \\
+-\uul{G}^T & \uul{C}
 \end{bmatrix}
 \begin{bmatrix}
 \Delta \ul{u}_{j,t} \\
@@ -234,7 +234,7 @@ Once boundary conditions have been satisfied at the beginning of an iteration, |
 \oset{\text{cont}}{\ul{R}}
 \end{bmatrix}
 \end{equation}
-Because we are looking at the incompressible code, the temperature equation is not included in the flow solve matrix system, and is instead solved separately as a scalar.
+Because we are looking at the incompressible code, the temperature equation is not included in the flow solve matrix system, and is instead solved separately as a scalar. Further note that in code, $\uul{K} = |xKebe|$, and $\uul{G}$ on top of $\uul{C}$ is |xGoC|.
 \begin{outline}[deep]
 \1 |SolFlow| --- perform a flow solve; output |res| preconditioned residual, 
 	\2 |itrYAlpha| --- compute $\oset{n+\alpha_f}{\ul{Y}}^{(i)}$ and $\oset{n+\alpha_m}{\ul{Y}}^{(i)}_{,t}$, store respectively in |yAlpha| and |acAlpha|
@@ -246,8 +246,10 @@ Because we are looking at the incompressible code, the temperature equation is n
 			\4 |qpbc| --- satisfy periodic BCs on |rmass| and |qres|
 		\3 initialize |res = 0|, which is the full system residual $\ul{G}_b$
 		\3 |do iblk = 1, nelblk| --- loop over element blocks
-			\4 |AsIGMR| --- compute and assemble residual and tangent matrix
+			\4 |AsIGMR|\ra --- compute and assemble residual and tangent matrix
 			\4 |bc3lhs| --- satisfy boundary conditions on the tangent matrix
+				\5 |do| loop over elements |iel| and local shape functions |inod|
+					\6 
 			\4 |fillsparseI| --- fill the sparse tangent matrix data structures, 
 		\3 |lmassadd| --- add lumped mass matrix contributions if we are lumping
 		\3 compute time averaged statistics
@@ -270,14 +272,12 @@ The diffusive flux residual vector |qres| and the lumped mass matrix |rmass| are
 	\2 |e3q| --- compute the element-wise residuals |ql| and |rmassl|
 		\3 |do intp = 1, ngauss| --- loop over Gauss points
 			\4 |getshp| --- get shape functions and derivatives at Gauss points
-			\4 |e3qvar| --- compute integration variables necessary for formation of |ql|
-				\5 
+			\4 |e3qvar| --- compute integration variables necessary for formation of |ql|; this routine is straight-forward, and returns |dxdxi|, |dxidx|, |WdetJ|, |shg|, and gradients of |y| in the usual manner
 			\4 |getdiff| --- compute the viscosity at this point
 			\4 compute diffusive fluxes, stored in |qdi|
-			\4 |do i = 1, nshl| --- loop over local nodes
-				\5 add contributions to |ql|
+			\4 add local node contributions to |ql|
 			\4 compute local contribution to the lumped mass matrix |rmassl|
-			\4 compute 
+			\4 |if isurf .eq. 1| --- if surface tension is being computed, compute and fill the extra three indices of |ql|
 		\3 normalize the mass matrix if desired (if |idiff == 3|)
 	\2 scatter $|ql| \rightarrow |qres|$ and $|rmassl| \rightarrow |rmass|$
 \end{outline}
