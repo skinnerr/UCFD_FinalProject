@@ -61,54 +61,62 @@ Routines followed by an asterisk (\ra) are outlined in further detail separately
 	\2 |phasta|
 		\3 initialize PETSc
 		\3 |input_fform| --- read ASCII data from |input.config| and |solver.inp|
-		\3 |input| --- populate data structures with problem set-up and solver parameters
-			\4 |readnblk| --- read and blocks data
-				\5 read |numstart.dat| and finds appropriate |restart.dat| files
-				\5 read geometry from Posix or SyncIO files using |phio_readheader|
-				\5 calculate maximum number of boundary element nodes
-				\5 initialize constants like |ndof|, |ndofBC|, |ndiBCB|, and |ndBCB|
-				\5 |genblk| --- read and block connectivity
-				\5 read BC mapping array into |nBC|
-				\5 read temporary boundary condition code into |iBCtmp|
-				\5 read BC data into |BCinp|
-				\5 read periodic BC data into |iperread|
-				\5 |genbkb| --- generate boundary element blocks and traces for gather/scatter operations
-				\5 read restart data for solution |qold|, displacement |uold|, and accelerations |acold|
-			\4 echo global information
-			\4 assert valid input constants (e.g. |icoord|, |navier|, |iexec|) defined in |common.h|
-			\4 echo solver and integration information
-			\4 |genint| --- generate integration information
-			\4 estimate number of nonzero globals
-			\4 compute fluid thermodynamic properties
-		\3 |proces| --- generate problem data and calls the solution driver
-			\4 |gendat| --- generate geometry and BC data
-				\5 |genshp| --- generate interior element shape functions and derivatives
-					\6 loop through element topologies, getting their coordinate system and element type, and then generate the parent element shape functions and their derivatives by calling either |shpTet| (tets), |shphex| (hexes), |shp6w| (wedges), or |shppyr| (pyramids)
-					\6 these are all C routines, and some are in |phasta/shapeFunction/|, whereas others are in |phasta/phSolver|
-					\6 |shp(a,i,j,p)| and |shgl(a,i,p)| are indexed by topology index |a|, spatial dimension(s) |i| and |j|, and the integration point index $|p| = 1, ..., |nint|$
-				\5 |geniBC| --- generate boundary condition codes
-					\6 set |iBC| to |iBCtmp| if this partition has boundary nodes
-				\5 |genBC| --- generate the essential boundary conditions
-					\6 set |BCtmp| to |BCinp| if this partition has boundary nodes
-					\6 |genwnm| --- calculate wall normals and modify |BCtmp| with the appropriate constraints
-					\6 |genotwn| --- determine first ``off-the-wall-node'' for each node, store result in |otwn(nshg)|
-					\6 |genBC1| --- account for arbitrarily-oriented velocity constraints $u_r$, $u_s$, and $u_t$, finally storing the simplified result in |BC|
-				%\5 work with Dirichlet-to-Neumann BCs (?)
-				\5 |genshpb| --- generate boundary element shape functions and derivatives (like |genshp|), storing results in |shpb| and |shglb|
-				\5 LES: call |setfilt|, |filtprep|, and depending on |iLES|' value, |setave| and |aveprep|
-				\5 |genini| --- generate initial values of solution variables
-					\6 |restar| --- sort initial values into |y| (called |q| inside |restar|) and |ac| from |qold| and |acold|, respectively, that were read in |readnblk|
-					\6 |itrBC|\ra and |itrBCSclr|\ra --- satisfy BCs
-			\4 |setper| and |perprep| --- store inverse of sum of one and number of slaves in |rcount|
-			\4 LES: |keeplhsG| and |setrls|
-			\4 |initStats| --- allocate arrays to store flow statistics
-			\4 RANS-specific routine |initTurb|
-			%\4 cardiovascular-specific routine |initSponge|
-			%\4 adjust BCs to interpolate from file |inlet.dat|, if it exists
-			%\4 set up eddy-viscosity ramp specific to NGC/Duct case
-			\4 |itrdrv|\ra --- iterate the discrete solution using the predictor multi-corrector algorithm
+		\3 |input|\ra --- populate data structures with problem set-up and solver parameters
+		\3 |proces|\ra --- generate problem data and calls the solution driver
 		\3 finalize PETSc
 	\2 finalize MPI
+\end{outline}
+
+Inputs:
+\begin{outline}[deep]
+\1 |input| --- populate data structures with problem set-up and solver parameters
+	\2 |readnblk| --- read and blocks data
+		\3 read |numstart.dat| and finds appropriate |restart.dat| files
+		\3 read geometry from Posix or SyncIO files using |phio_readheader|
+		\3 calculate maximum number of boundary element nodes
+		\3 initialize constants like |ndof|, |ndofBC|, |ndiBCB|, and |ndBCB|
+		\3 |genblk| --- read and block connectivity
+		\3 read BC mapping array into |nBC|
+		\3 read temporary boundary condition code into |iBCtmp|
+		\3 read BC data into |BCinp|
+		\3 read periodic BC data into |iperread|
+		\3 |genbkb| --- generate boundary element blocks and traces for gather/scatter operations
+		\3 read restart data for solution |qold|, displacement |uold|, and accelerations |acold|
+	\2 assert valid input constants (e.g. |icoord|, |navier|, |iexec|) defined in |common.h|
+	\2 |genint| --- generate integration information: number of quadrature points on the interior |nint| and boundary |nintb|, their weights |Qwt| and |Qwtb|, and locations |Qpt| and |Qptb|
+	\2 estimate number of global nonzeros |nnz| based on basis function order |ipord|
+	\2 compute fluid thermodynamic properties
+\end{outline}
+
+Process:
+\begin{outline}[deep]
+\1 |proces| --- generate problem data and call the solution driver
+	\2 |gendat| --- generate geometry and BC data
+		\3 |genshp| --- generate interior element shape functions and derivatives
+			\4 loop through element topologies, getting their coordinate system and element type, and then generate the parent element shape functions and their derivatives by calling either |shpTet| (tets), |shphex| (hexes), |shp6w| (wedges), or |shppyr| (pyramids)
+			\4 these are all C routines, and some are in |phasta/shapeFunction/|, whereas others are in |phasta/phSolver|
+			\4 return |shp(a,i,j,p)| and |shgl(a,i,p)|, which are indexed by topology index |a|, spatial dimension(s) |i| and |j|, and the integration point index $|p| = 1, ..., |nint|$
+		\3 |geniBC| --- generate boundary condition codes
+			\4 set |iBC = iBCtmp| if this partition has boundary nodes; see code for |BCinp| description
+		\3 |genBC| --- generate the essential boundary conditions
+			\4 set |BCtmp = BCinp| if this partition has boundary nodes; |BCtmp(nshg,6+5*I3nsd)| has a second index of $\rho$, $T$, $p$, velocities, scalars (?)
+			\4 |genwnm| --- calculate wall normals and modify |BCtmp| with the appropriate constraints
+			\4 |genotwn| --- determine first ``off-the-wall-node'' for each node, store result in |otwn(nshg)|
+			\4 |genBC1| --- account for arbitrarily-oriented velocity constraints $u_r$, $u_s$, and $u_t$, finally storing the simplified boundary condition constraint result in |BC|; note that second index of |BC| holds $\rho$, $T$, $p$, $u_1$, $u_2$, $u_3$, and scalars
+		%\3 work with Dirichlet-to-Neumann BCs (?)
+		\3 |genshpb| --- generate boundary element shape functions and derivatives (like |genshp|), storing results in |shpb| and |shglb|
+		\3 LES: call |setfilt|, |filtprep|, and depending on |iLES|' value, |setave| and |aveprep|
+		\3 |genini| --- generate initial values of solution variables
+			\4 |restar| --- sort initial values into |y| (called |q| inside |restar|) and |ac| from |qold| and |acold|, respectively, that were read in |readnblk|
+			\4 |itrBC|\ra and |itrBCSclr|\ra --- satisfy BCs
+	\2 |setper| and |perprep| --- store inverse of sum of one and number of slaves in |rcount|
+	\2 LES: |keeplhsG| and |setrls|
+	\2 |initStats| --- allocate arrays to store flow statistics
+	\2 RANS: |initTurb|
+	%\2 cardiovascular-specific routine |initSponge|
+	%\2 adjust BCs to interpolate from file |inlet.dat|, if it exists
+	%\2 set up eddy-viscosity ramp specific to NGC/Duct case
+	\2 |itrdrv|\ra --- iterate the discrete solution using the predictor multi-corrector algorithm
 \end{outline}
 
 Numerical solution of the time-integrated unsteady Navier-Stokes equations occurs within |itrdrv|. Working arrays are listed in Table \ref{tbl:symbols}.
@@ -116,16 +124,29 @@ Numerical solution of the time-integrated unsteady Navier-Stokes equations occur
 \1 |itrdrv|
 	\2 |initTimeSeries| --- initialize time series collection to |varts.*.dat| files using |xyzts.dat| input
 	\2 initialize |istep| and |ifuncs(:)| to zero
-	\2 set |yold = y| and |acold = ac|, that is, populate $\oset{n}{\ul{Y}}$ and $\oset{n}{\ul{Y}_{,t}}$ with their converged solutions from the previous time step, which was read from a restart file
-	\2 |initEQS| --- initialize equation solver (look into this later \ra?)
+	\2 set |yold = y| and |acold = ac|, that is, populate $\oset{n}{\ul{Y}}$ and $\oset{n}{\ul{Y}_{,t}}$ with their converged solutions from the previous time step, which came from a restart file
+	\2 |initEQS| --- create the |rowp| and |colm| maps to facilitate sparse storage of the tangent matrix
+		\3 determine how many scalar equations need solution, |nsclrsol| (\# scalars + 1 if temperature)
+		\3 determine whether we are solving the flow
+		\3 |genadj| --- pre-process the adjacency list
+			\4 |do iblk = 1, nelblk| --- loop over blocks (groups of elements with the same topology)
+				\5 |Asadj| --- generate adjacency data structures |row_fill_list| and |adjcnt|
+					\6 declare |row_fill_list| to have dimension |(nshg, 15*nnz)|, where |15*nnz| is a high estimate of the maximum number of adjacent nodes
+					\6 |row_fill_list(A,:)| holds global nodes that share local support with global node |A|
+					\6 |adjcnt(A)| holds the number of nodes adjacent to |A|, that is, how many entries |row_fill_list(A,:)| was populated with on purpose
+					\6 \emph{note}: some operations here are $\bigo(n^2)$, but $n$ is relatively small on each processor, and this process only needs to be done once for a given mesh connectivity
+			\4 build the |colm| array (which is trivial to do at this point)
+			\4 sort |rowp|, because we binary search it when computing the sparse $\uul{A}\:\ul{p}$-product, and also compute the number of non-zero blocks |icnt| on this partition
+		\3 set |nnz_tot = icnt|
+		\3 depending on |nsolflow| and |nsclrsol| (whether this is a flow or scalar solve), initialize certain constants, such as |equType|, |nDofs|, |nPermDims|, |nTmpDims|, and allocate certain arrays, such as |apermS| and |atempS|
 	\2 initialize |lstep0 = lstep + 1| to hold the first time step solved by the current run
 	\2 |do itsq = 1, ntseq| --- loop over time sequences; as far as I can tell |ntseq = 1| is the default in |input.config|, and time sequences are not often used
 		\3 set |itseq = itsq|
 		\3 set iteration-specific variables |nstp = nstep|, |nitr = niter|, |LCtime = loctim|, and |dtol(:) = deltol(:)|, where all of the longer-named variables are indexed by |itseq|
 		\3 |itrSetup| --- set up time integration parameters
 			\4 calculate $\alpha_m$, $\alpha_f$, and $\gamma$ as functions of $\rho_\infty$ (|almi|, |alfi|, and |gami| as functions of |rhoinf|)
-%			\4 set Jacobian type (appears to be for a fringe case only?)
-%			\4 mess with |ipred| and |y| for the same-delta predictor if we're on the first sequence
+			%\4 set Jacobian type (appears to be for a fringe case only?)
+			%\4 mess with |ipred| and |y| for the same-delta predictor if we're on the first sequence
 			\4 set inverse of global time step |Dtgl| and CFL data |CFLfl|
 		\3 calculate number of flow solves per time step, store in |nitr| (IC), |niter| (C)
 		\3 initialize |istop = 0|; flag can be set to stop the solver based on statistics of the residual
@@ -166,18 +187,17 @@ Boundary conditions are set with the |iBC| and |BC| arrays. The bits of |iBC|, i
 \begin{outline}[deep]
 \1 |itrBC| --- satisfy BCs on the primitive variables
 	\2 impose limits on flow variables in |y|, using the |ylimit| data structure of dimension |(3, nflow)|, whose first index contains the limit flag, lower limit, and upper limit for each flow variable
-	\2 velocity BCs
-		\3 
-	\2 pressure BCs
-		\3 
-	\2 local periodic BCs
-	\2 global periodic BCs
+	\2 velocity
+	\2 pressure
+	\2 local periodic
+	\2 global periodic
 \end{outline}
 
 Once boundary conditions have been satisfied, |SolFlow| is called to perform a flow solve:
 \begin{outline}[deep]
 \1 |SolFlow| --- perform a flow solve; output |res| preconditioned residual, 
-	\2 
+	\2 |itrYAlpha| --- compute $\oset{n+\alpha_f}{\ul{Y}}^{(i)}$ and $\oset{n+\alpha_m}{\ul{Y}}^{(i)}_{,t}$, store respectively in |yAlpha| and |acAlpha|
+	\2 |ElmGMR| --- compute tangent matrix, residual vector, and preconditioning matrix for GMRES
 \end{outline}
 
 Going through lectures 26 and 27.
@@ -193,8 +213,6 @@ for natural bcs, |ibcb|(1:nel$_\text{in block (npro)}$,...) is a bitmap to bound
 
 going through more code... (2016-03-30)
 
-compressible |itrdrv|. common |genadj| creates |rowp| and |colm|, assuming we had the matrix in our hands. but how do we do this if we don't have the non-sparse matrix availble? that's what |genadj| does. |asadj| loops over elements, gets a list of local node numbers, cross-associate them in the |row_fill_list| if that global node doesn't need to be put in the |row_fill_list|. only needs to be done once each time per adaptation; some stuff is $\bigo(n^2)$, but per processor. So maybe only 600=n per processors, which is not that bad. Back in |genadj|, we build the |rowp| and |col| arrays. we need their elements to be ordered since we do a binary search on them at some points.
-
 this stuff is used in |irdrv| when it calls |solgmrs|, calls |elmgmrs| to populate lshk with current iteration's tangent values (same for |res|). allows us to start |gmres|; factorize matrix; precondition rhs with |i3lu|; |spsi3pre| sparse matrix preconditioning of |lhsk|; copy preconditioned residual into |uBrg|, which is a collection or Krylov vectors; calculate it's norm, make orthonormal; outer gmres loop |do 2000| can be skipped, which is the gmres restart; actual start of GMRES discussed in class is |uBrg| statement just before |do 1000|; |sumgat| does off-processor (communication).
 
 
@@ -203,14 +221,16 @@ this stuff is used in |irdrv| when it calls |solgmrs|, calls |elmgmrs| to popula
 \toprule
 Symbol & Dimension & Description \\
 \midrule
-|nshg|   &  & \# global shape functions (|ngsh| = |nnp| if piecewise linear) \\
+|nshg|   &  & \# global shape functions (|nshg| = |nnp| if piecewise linear) \\
 |nnp|    &  & \# global nodal points \\
-|npro|   &  & \# elements, indexed by $e$ \\
+|npro|   &  & \# elements in a block of same-topology elements, indexed by $e$ \\
 |nshl|   &  & \# nodes per element, indexed by $a$ \\
 |ndof|   &  & \# degrees of freedom, including scalars for turbulence models \\
 |nflow|  &  & \# flow variables (4 incompressible, 5 compressible) \\
-|ntseq|  &  & \# time sequences (?) \\
-|nstep|  &  & \# time steps requested for current run \\
+|ntseq|  &  & \# time sequences, which seems seldom used and defaults to 1 \\
+|nstep|  &  & \# time steps requested per sequence \\
+|nelblk| &  & \# blocks \\
+|ipord|  &  & order of basis functions \\
 |lstep|  &  & current time step \\
 |lstep0| &  & first time step solved by current run, initialized to |lstep+1| \\
 |istep|  &  & step number relative to start of run \\
@@ -230,6 +250,8 @@ Symbol & Dimension & Description \\
 |iBC|    & |(nshg)|                  & BC codes \\
 |BC|     & |(nshg, ndofBC)|          & BC constraint parameters \\
 |iper|   & |(nshg)|				    & periodicity table \\
+|mien|   & |(nelblk)|			    & pointer to IEN array (interior): has dimension |(nshg, 15*nnz)| \\
+|mienb|  & |(nelblk)|			    & pointer to IEN array (boundary): has dimension |(nshg, 15*nnz)| \\
 |shp|    & |(nshape, ngauss)|        & element shape functions at Gauss points (interior) \\
 |shb|    & |(nshapeb, ngaussb)|      & element shape functions at Gauss points (boundary) \\
 |shgl|   & |(nsd, nshape, ngauss)|   & local shape function gradients at Gauss points (interior) \\
@@ -239,12 +261,19 @@ Symbol & Dimension & Description \\
 \label{tbl:symbols}
 \end{center}
 
+\section{General Notes}
+\begin{outline}[deep]
+\1 In PHASTA, a block contains elements of the same topology.
+\end{outline}
+
 \section{Life's Persistent PHASTA Questions}
 \begin{outline}[deep]
 	\1 Is |qold|, allocated in |readnblk.f| ever deallocated? Can't find it.
 	\1 Why do most of the time step parameters have dimension |MAXTS|?
 		\2 It also seems that some parameters are indexed by |itseq|, but don't change from step to step.
 	\1 When is it the case that $|ndof| \ne |nflow|$? For example during its limit-imposing stage, |itrbc| loops over |nflow| when indexing |y|'s dimension of size |ndof|.
+	\1 Often the value of |datmat(1,2,1)| is assigned to a variable like |rmu|; where it it calculated? Kinematic viscosity? See |getdiff|.
+	\1 In |genBC1|, |BC(:,1)| gets assigned both density and pressure, so what goes in |BC(:,6)|???
 \end{outline}
 
 %%
