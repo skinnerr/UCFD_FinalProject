@@ -19,9 +19,9 @@
 
 \fancypagestyle{firstpage}
 {
-	\fancyhf[LH]{\Large Final Project \\ \large ASEN 5519: Unstructured CFD}
+	\fancyhf[LH]{\Large Final Project Proposal and Outline \\ \large ASEN 5519: Unstructured CFD}
 	\fancyhf[CH]{}
-	\fancyhf[RH]{\large Ryan Skinner \\ \large Due 2016/??/??}
+	\fancyhf[RH]{\large Ryan Skinner \\ \large Due 2016/04/01}
 	\fancyhf[LF]{}
 	\fancyhf[CF]{}
 	\fancyhf[RF]{}
@@ -33,27 +33,27 @@
 
 \vspace*{0in}
 \begin{center}
-\LARGE Improving Boundary Condition Stability in PHASTA
+\LARGE Improving Compressible BC Robustness in PHASTA
 \end{center}
 \vspace*{0.3in}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Introduction}
+\section{Proposal}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+For the final project, I propose a detailed investigation and improvement of boundary condition implementation in the compressible version of PHASTA. Currently, the incompressible version's non-linear convergence is much more robust than that of the compressible version; it often takes considerable manual effort to push a compressible case through its initial transient. By studying the incompressible version's implementation of BCs, I will identify aspects of the compressible code for improvement. The final deliverable will be a detailed algorithmic outline of both codes' BC implementation, a discussion of improvements selected for study, and benchmarks of the degree to which they affect non-linear convergence of a familiar compressible case: that of the aggressive subsonic diffuser.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Initial Outline of PHASTA}
+\section{Initial Outline of PHASTA: Incompressible}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depending on which branch is desired. This function initializes MPI, and then calls |phasta|, located in |/phSolver/common|. Here, inputs are read and computed in |input|, and then the solver is run by calling |proces|, a Fortran routine. Within |proces|, |gendat| generates geometry and BC data.
+Though the final deliverable will include outlines of the BC implementation in both compressible and incompressible versions of PHASTA, the initial outline will be presented here using the latter version due to its robustness. In the following outline, routines followed by an asterisk (\ra) are expanded and described in their own separate block. Important integers and arrays are listed in Table \ref{tbl:symbols}. Furthermore, we ignore cardiovascular impedance and RCR boundary condition statements.
 
-Routines followed by an asterisk (\ra) are outlined in further detail separately.
-
-{\huge \color{red!75!black} INCOMPRESSIBLE ONLY}, and we ignore cardiovascular impedance and RCR boundary stuff.
+PHASTA begins execution at |main|, located in |phSolver/[in]compressible|, depending on which branch is desired. This function initializes MPI, and then calls |phasta|, located in |/phSolver/common|. Here, inputs are read and computed in |input|, and then the solver is run by calling |proces|.
 
 \begin{outline}[deep]
 \1 |main|
@@ -67,44 +67,55 @@ Routines followed by an asterisk (\ra) are outlined in further detail separately
 	\2 finalize MPI
 \end{outline}
 
-Inputs:
+Most file input occurs in |input|, which populates data structures with problem and solver parameters.
 \begin{outline}[deep]
-\1 |input| --- populate data structures with problem set-up and solver parameters
+\1 |input|
 	\2 |readnblk| --- read and blocks data
 		\3 read |numstart.dat| and finds appropriate |restart.dat| files
 		\3 read geometry from Posix or SyncIO files using |phio_readheader|
 		\3 calculate maximum number of boundary element nodes
 		\3 initialize constants like |ndof|, |ndofBC|, |ndiBCB|, and |ndBCB|
-		\3 |genblk| --- read and block connectivity
+		\3 |ctypes| --- initialize variables for parallel processing
+		\3 |genblk| --- read and block connectivity for interior elements; there are two other versions of this function, |genblkPosix| and |genblkSyncIO|, which just address idiosyncrasies of the file formats; all call |gensav|
+			\4 |gensav| --- save element block data to and return an |ien| array, mapping element and local node numbers to global node number, and a material type flag |mater|
 		\3 read BC mapping array into |nBC|
 		\3 read temporary boundary condition code into |iBCtmp|
 		\3 read BC data into |BCinp|
 		\3 read periodic BC data into |iperread|
-		\3 |genbkb| --- generate boundary element blocks and traces for gather/scatter operations
+		\3 |genbkb| --- generate boundary element blocks and traces for gather/scatter operations; there are two other versions of this function, |genbkbPosix| and |genbkbSyncIO|, which just address idiosyncrasies of the file formats; all call |gensvb|
+			\4 |gensvb| --- save boundary element block data to and return boundary nodal connectivity |ienb|, boundary condition codes |iBCB|, boundary condition values |BCB|, and material type flag |materb|
 		\3 read restart data for solution |qold|, displacement |uold|, and accelerations |acold|
 	\2 assert valid input constants (e.g. |icoord|, |navier|, |iexec|) defined in |common.h|
-	\2 |genint| --- generate integration information: number of quadrature points on the interior |nint| and boundary |nintb|, their weights |Qwt| and |Qwtb|, and locations |Qpt| and |Qptb|
+	\2 |genint| --- generate integration information: number of quadrature points on the interior |nint| and boundary |nintb|, their weights |Qwt| and |Qwtb|, and locations |Qpt| and |Qptb|; the following routines are called to populate these variables depending on type of element and whether it is on the boundary
+		\3 |symtet| --- interior tetrahedra
+		\3 |symtri| --- boundary tetrahedra, boundary wedges (if boundary face is a triangle)
+		\3 |symhex| --- interior hexahedra
+		\3 |symquad| --- boundary hexahedra, boundary pyramids (if boundary face is a quadrilateral)
+		\3 |sympyr|--- interior pyramids
+		\3 |symtripyr| --- boundary pyramids (if boundary face is a triangle)
+		\3 |symwdg| --- interior wedges
+		\3 |symquadw| --- boundary wedges (if boundary face is a quadrilateral)
 	\2 estimate number of global nonzeros |nnz| based on basis function order |ipord|
-	\2 compute fluid thermodynamic properties
+	\2 compute fluid thermodynamic properties, such as specific heats and the gas constant
 \end{outline}
 
-Process:
+The next overarching routine, |proces|, generates problem data and calls the solution driver.
 \begin{outline}[deep]
-\1 |proces| --- generate problem data and call the solution driver
+\1 |proces|
 	\2 |gendat| --- generate geometry and BC data
-		\3 |genshp| --- generate interior element shape functions and derivatives
+		\3 |xyzbound| --- compute length scales (domain size) of the problem by looking at minima and maxima of the |x| array
+		\3 |genshp| --- generate interior element shape functions and shape function derivatives
 			\4 loop through element topologies, getting their coordinate system and element type, and then generate the parent element shape functions and their derivatives by calling either |shpTet| (tets), |shphex| (hexes), |shp6w| (wedges), or |shppyr| (pyramids)
-			\4 these are all C routines, and some are in |phasta/shapeFunction/|, whereas others are in |phasta/phSolver|
+			\4 these are all Fortran wrappers (located in |phasta/common/*.c|) for the C routines called |TetShapeAndDrv| (in |shapeFunction/src/uniformP.c|), |HexShapeAndDrv|, |WedgeShapeAndDrv|, and |PyrShapeAndDrv| (these three in |phasta/common/newshape.cc|) respectively
 			\4 return |shp(a,i,j,p)| and |shgl(a,i,p)|, which are indexed by topology index |a|, spatial dimension(s) |i| and |j|, and the integration point index $|p| = 1, ..., |nint|$
-		\3 |geniBC| --- generate boundary condition codes
-			\4 set |iBC = iBCtmp| if this partition has boundary nodes; see code for |BCinp| description
+		\3 |geniBC| --- generate boundary condition codes, stored as a bitmap for each global node number (bitmap described just before description of |iBC| routine in this document)
+			\4 set |iBC(:) = iBCtmp(nBC(:))| if this partition has boundary nodes; |nBC| is used to map from the |iBCtmp| data read in |readnblk| to |iBC|, which is indexed by the full global node number
 		\3 |genBC| --- generate the essential boundary conditions
 			\4 set |BCtmp = BCinp| if this partition has boundary nodes; |BCtmp(nshg,6+5*I3nsd)| has a second index of $\rho$, $T$, $p$, velocities, scalars (?)
 			\4 |genwnm| --- calculate wall normals and modify |BCtmp| with the appropriate constraints
 			\4 |genotwn| --- determine first ``off-the-wall-node'' for each node, store result in |otwn(nshg)|
 			\4 |genBC1| --- account for arbitrarily-oriented velocity constraints $u_r$, $u_s$, and $u_t$, finally storing the simplified boundary condition constraint result in |BC|; note that second index of |BC| holds $\rho$, $T$, $p$, $u_1$, $u_2$, $u_3$, and scalars
-		%\3 work with Dirichlet-to-Neumann BCs (?)
-		\3 |genshpb| --- generate boundary element shape functions and derivatives (like |genshp|), storing results in |shpb| and |shglb|
+		\3 |genshpb| --- generate boundary element shape functions and derivatives, storing results in |shpb| and |shglb|; this routine is analogous to |genshp|
 		\3 LES: call |setfilt|, |filtprep|, and depending on |iLES|' value, |setave| and |aveprep|
 		\3 |genini| --- generate initial values of solution variables
 			\4 |restar| --- sort initial values into |y| (called |q| inside |restar|) and |ac| from |qold| and |acold|, respectively, that were read in |readnblk|
@@ -113,13 +124,10 @@ Process:
 	\2 LES: |keeplhsG| and |setrls|
 	\2 |initStats| --- allocate arrays to store flow statistics
 	\2 RANS: |initTurb|
-	%\2 cardiovascular-specific routine |initSponge|
-	%\2 adjust BCs to interpolate from file |inlet.dat|, if it exists
-	%\2 set up eddy-viscosity ramp specific to NGC/Duct case
 	\2 |itrdrv|\ra --- iterate the discrete solution using the predictor multi-corrector algorithm
 \end{outline}
 
-Numerical solution of the time-integrated unsteady Navier-Stokes equations occurs within |itrdrv|. Working arrays are listed in Table \ref{tbl:symbols}.
+Numerical solution of the time-integrated unsteady Navier-Stokes equations occurs within |itrdrv|.
 \begin{outline}[deep]
 \1 |itrdrv|
 	\2 |initTimeSeries| --- initialize time series collection to |varts.*.dat| files using |xyzts.dat| input
@@ -145,8 +153,6 @@ Numerical solution of the time-integrated unsteady Navier-Stokes equations occur
 		\3 set iteration-specific variables |nstp = nstep|, |nitr = niter|, |LCtime = loctim|, and |dtol(:) = deltol(:)|, where all of the longer-named variables are indexed by |itseq|
 		\3 |itrSetup| --- set up time integration parameters
 			\4 calculate $\alpha_m$, $\alpha_f$, and $\gamma$ as functions of $\rho_\infty$ (|almi|, |alfi|, and |gami| as functions of |rhoinf|)
-			%\4 set Jacobian type (appears to be for a fringe case only?)
-			%\4 mess with |ipred| and |y| for the same-delta predictor if we're on the first sequence
 			\4 set inverse of global time step |Dtgl| and CFL data |CFLfl|
 		\3 calculate number of flow solves per time step, store in |nitr| (IC), |niter| (C)
 		\3 initialize |istop = 0|; flag can be set to stop the solver based on statistics of the residual
@@ -252,10 +258,10 @@ Symbol & Dimension & Description \\
 |iper|   & |(nshg)|				    & periodicity table \\
 |mien|   & |(nelblk)|			    & pointer to IEN array (interior): has dimension |(nshg, 15*nnz)| \\
 |mienb|  & |(nelblk)|			    & pointer to IEN array (boundary): has dimension |(nshg, 15*nnz)| \\
-|shp|    & |(nshape, ngauss)|        & element shape functions at Gauss points (interior) \\
-|shb|    & |(nshapeb, ngaussb)|      & element shape functions at Gauss points (boundary) \\
-|shgl|   & |(nsd, nshape, ngauss)|   & local shape function gradients at Gauss points (interior) \\
-|shglb|  & |(nsd, nshapeb, nguassb)| & local shape function gradients at Gauss points (boundary) \\
+|shp|    & |(nshape, ngauss)|        & physical shape functions at Gauss points (interior) \\
+|shb|    & |(nshapeb, ngaussb)|      & physical shape functions at Gauss points (boundary) \\
+|shgl|   & |(nsd, nshape, ngauss)|   & parent shape function gradients at Gauss points (interior) \\
+|shglb|  & |(nsd, nshapeb, nguassb)| & parent shape function gradients at Gauss points (boundary) \\
 \bottomrule
 \end{tabular}
 \label{tbl:symbols}
